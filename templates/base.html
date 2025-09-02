@@ -3,23 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Mi Proyecto Flask{% endblock %}</title>
-    <!-- Enlazar el archivo CSS estático -->
+    <title>{% block titulo %}{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
     <header>
+        <h1>Mi Proyecto Flask</h1>
         <nav>
-            <a href="{{ url_for('home') }}">Inicio</a>
-            <a href="{{ url_for('about') }}">Acerca de</a>
+            <ul>
+                <li><a href="{{ url_for('index') }}">Inicio</a></li>
+                <li><a href="{{ url_for('formulario') }}">Formulario</a></li>
+            </ul>
         </nav>
     </header>
+
     <main>
-        <!-- Contenido principal de cada página -->
-        {% block content %}{% endblock %}
+        {% block contenido %}{% endblock %}
     </main>
+
     <footer>
-        <p>&copy; 2024 Mi Proyecto Flask</p>
+        <p>&copy; 2025 Mi Proyecto Flask</p>
     </footer>
 </body>
 </html>
