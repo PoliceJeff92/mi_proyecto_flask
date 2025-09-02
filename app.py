@@ -164,4 +164,7 @@ def leer_db():
     return jsonify(resultado)
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Cambia esto para que no se ejecute en el servidor de Render
+    # app.run(debug=True)
+    # El servidor Gunicorn se encargará de ejecutar la app
+    pass
