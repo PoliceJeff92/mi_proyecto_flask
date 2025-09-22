@@ -11,13 +11,31 @@
         <h1>Mi Proyecto Flask</h1>
         <nav>
             <ul>
-                <li><a href="{{ url_for('index') }}">Inicio</a></li>
+                <li><a href="{{ url_for('home') }}">Inicio</a></li>
                 <li><a href="{{ url_for('formulario') }}">Formulario</a></li>
+                
+                {% if current_user.is_authenticated %}
+                <li><a href="{{ url_for('profile') }}">Perfil</a></li>
+                <li><a href="{{ url_for('logout') }}">Cerrar Sesión</a></li>
+                {% else %}
+                <li><a href="{{ url_for('registro') }}">Registro</a></li>
+                <li><a href="{{ url_for('login') }}">Iniciar Sesión</a></li>
+                {% endif %}
             </ul>
         </nav>
     </header>
 
-    <main>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+            <div class="alert alert-{{ category }}">
+                {{ message }}
+            </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <main class="content-container">
         {% block contenido %}{% endblock %}
     </main>
 
