@@ -11,7 +11,6 @@
         </a>
     </div>
 
-    <!-- Mostrar mensajes flash -->
     {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
             {% for category, message in messages %}
@@ -32,6 +31,7 @@
                         <th scope="col">Nombre</th>
                         <th scope="col">Email</th>
                         <th scope="col">Teléfono</th>
+                        <th scope="col" class="text-center">Historial</th> <!-- COLUMNA RENOMBRADA -->
                         <th scope="col" class="text-center">Acciones</th>
                     </tr>
                 </thead>
@@ -42,11 +42,27 @@
                         <td>{{ cliente.nombre }}</td>
                         <td>{{ cliente.email }}</td>
                         <td>{{ cliente.telefono }}</td>
+                        
+                        <!-- Columna de Historial (Ver Compras) -->
                         <td class="text-center">
-                            <a href="{{ url_for('editar_cliente', id_cliente=cliente.id_cliente) }}" class="btn btn-sm btn-info text-white me-2">
+                            <a href="{{ url_for('ver_compras', cliente_id=cliente.id_cliente) }}" class="btn btn-sm btn-info text-white" title="Ver Historial de Compras">
+                                <i class="bi bi-clock-history me-1"></i> Ver Historial
+                            </a>
+                        </td>
+                        
+                        <!-- Columna de Acciones (Registrar, Editar, Eliminar) -->
+                        <td class="text-center">
+                            <!-- NUEVO BOTÓN: Enlace para registrar una nueva compra -->
+                            <a href="{{ url_for('registrar_compra', cliente_id_opcional=cliente.id_cliente) }}" class="btn btn-sm btn-success me-2" title="Registrar Nueva Compra">
+                                <i class="bi bi-cart-plus-fill"></i> Registrar
+                            </a>
+                            
+                            <!-- Botón de Editar -->
+                            <a href="{{ url_for('editar_cliente', id_cliente=cliente.id_cliente) }}" class="btn btn-sm btn-warning me-2" title="Editar">
                                 <i class="bi bi-pencil-square"></i> Editar
                             </a>
-                            <!-- Botón que activa el modal de confirmación -->
+                            
+                            <!-- Botón de Eliminar (con Modal) -->
                             <button type="button" class="btn btn-sm btn-danger" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal" data-id="{{ cliente.id_cliente }}" data-nombre="{{ cliente.nombre }}">
                                 <i class="bi bi-trash-fill"></i> Eliminar
                             </button>
@@ -62,7 +78,7 @@
         </div>
     {% endif %}
 
-    <!-- Modal de Confirmación de Eliminación (Requiere Bootstrap JS) -->
+    <!-- Modal de Confirmación de Eliminación -->
     <div class="modal fade" id="confirmDeleteModal" tabindex="-1" aria-labelledby="confirmDeleteModalLabel" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-content">
@@ -71,11 +87,10 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    ¿Estás seguro de que deseas eliminar al cliente <strong id="clienteNombre"></strong>? Esta acción es irreversible.
+                    ¿Estás seguro de que deseas eliminar al cliente <strong id="clienteNombre"></strong>? Esta acción es irreversible y eliminará su historial de compras.
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                    <!-- El formulario se enviará al hacer clic en este botón -->
                     <form id="deleteForm" method="POST">
                         <button type="submit" class="btn btn-danger">Eliminar</button>
                     </form>
@@ -84,7 +99,7 @@
         </div>
     </div>
 
-    <!-- Script para actualizar el formulario del modal antes de eliminar -->
+    <!-- Script para manejar el Modal -->
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             var confirmDeleteModal = document.getElementById('confirmDeleteModal');

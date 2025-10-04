@@ -2,6 +2,7 @@ from flask import Flask, render_template, redirect, url_for, request, flash
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask_mysqldb import MySQL
 from werkzeug.security import generate_password_hash, check_password_hash
+import datetime # Importamos datetime para el formateo de fecha en Python si fuera necesario
 
 # Inicializar la aplicación Flask
 app = Flask(__name__)
@@ -77,7 +78,10 @@ def registro():
             return redirect(url_for('registro'))
         
         # HASHEAR Y GUARDAR
-        hashed_password = generate_password_hash(password, method='scrypt')
+        # NOTA IMPORTANTE: Usamos 'pbkdf2:sha256' como método por defecto de werkzeug si 'scrypt' 
+        # no está disponible o da problemas, ya que es más estable. Si tu entorno soporta 'scrypt' 
+        # sin problemas, puedes cambiarlo.
+        hashed_password = generate_password_hash(password, method='pbkdf2:sha256') 
         
         try:
             cur.execute("INSERT INTO users (username, password) VALUES (%s, %s)", (username, hashed_password))
@@ -363,7 +367,9 @@ def eliminar_cliente(id_cliente):
         
         # Revisa si se eliminó alguna fila
         if cur.rowcount > 0:
-            flash('Cliente eliminado exitosamente.', 'success')
+            # Gracias al ON DELETE CASCADE en la DB, se eliminan automáticamente 
+            # las entradas de clientes_productos relacionadas.
+            flash('Cliente eliminado exitosamente (incluyendo su historial de compras).', 'success')
         else:
             flash('Cliente no encontrado para eliminar.', 'error')
 
@@ -373,6 +379,189 @@ def eliminar_cliente(id_cliente):
         print(f"Error al eliminar cliente: {e}")
         flash('Ocurrió un error al intentar eliminar el cliente.', 'error')
         return redirect(url_for('leer_clientes'))
+
+
+# -----------------------------------------------
+# --- RUTA PARA LA RELACIÓN M:M (Compras) ---
+# -----------------------------------------------
+
+@app.route('/compras/<int:cliente_id>')
+@login_required
+def ver_compras(cliente_id):
+    """
+    Muestra la lista de productos comprados por un cliente específico.
+    """
+    cur = mysql.connection.cursor()
+
+    # 1. CONSULTA PRINCIPAL: Se mantienen las columnas de clientes_productos
+    query = """
+        SELECT 
+            c.nombre AS nombre_cliente,
+            p.nombre AS nombre_producto, 
+            cp.cantidad,
+            cp.fecha_compra AS fecha_compra_raw 
+        FROM 
+            clientes c
+        JOIN 
+            clientes_productos cp ON c.id_cliente = cp.id_cliente
+        JOIN 
+            productos p ON cp.id_producto = p.id_producto
+        WHERE 
+            c.id_cliente = %s
+        ORDER BY
+            cp.fecha_compra DESC
+    """
+    
+    cur.execute(query, (cliente_id,))
+    compras = cur.fetchall()
+    cur.close()
+
+    # 2. Determinar el nombre del cliente para el título de la página
+    nombre_cliente = "Cliente Desconocido"
+    if compras:
+        # Si hay resultados, el nombre del cliente ya está en el primer registro
+        nombre_cliente = compras[0]['nombre_cliente']
+    else:
+        # Si no hay compras, consultamos el nombre del cliente para mostrarlo
+        cur = mysql.connection.cursor()
+        cur.execute("SELECT nombre FROM clientes WHERE id_cliente = %s", (cliente_id,))
+        cliente_info = cur.fetchone()
+        cur.close()
+        if cliente_info:
+             nombre_cliente = cliente_info['nombre']
+
+    # Renderiza la plantilla 'compras_detalle.html' con los resultados
+    return render_template('compras_detalle.html', 
+                           compras=compras, 
+                           cliente_id=cliente_id,
+                           nombre_cliente=nombre_cliente)
+
+
+# -------------------------------------------------------------
+# --- RUTAS: REGISTRO DE COMPRAS (RELACIÓN M:M INSERT/UPDATE) ---
+# -------------------------------------------------------------
+
+@app.route('/registrar_compra/<int:cliente_id_opcional>', methods=['GET', 'POST'])
+@login_required
+def registrar_compra(cliente_id_opcional=None):
+    """
+    1. Si es GET, muestra el formulario para seleccionar producto y cantidad.
+    2. Si es POST, registra la compra en clientes_productos (usando UPDATE si ya existe), 
+       actualiza el stock y redirige.
+    """
+    # Abrimos el cursor para el manejo de la transacción
+    cur = mysql.connection.cursor() 
+
+    if request.method == 'POST':
+        # --- Lógica de Registro (POST) ---
+        id_cliente = request.form.get('id_cliente')
+        id_producto = request.form.get('id_producto')
+        cantidad = request.form.get('cantidad')
+
+        if not id_cliente or not id_producto or not cantidad:
+            flash('Faltan datos para registrar la compra.', 'error')
+            cur.close()
+            # Usamos el cliente_id_opcional para redirigir si está disponible
+            redir_id = cliente_id_opcional if cliente_id_opcional else id_cliente
+            return redirect(url_for('registrar_compra', cliente_id_opcional=redir_id))
+        
+        try:
+            id_cliente_int = int(id_cliente)
+            id_producto_int = int(id_producto)
+            cantidad_int = int(cantidad)
+            
+            if cantidad_int <= 0:
+                flash('La cantidad debe ser un número positivo.', 'error')
+                cur.close()
+                return redirect(url_for('registrar_compra', cliente_id_opcional=id_cliente_int))
+        except ValueError:
+            flash('El Cliente, Producto y Cantidad deben ser números enteros válidos.', 'error')
+            cur.close()
+            return redirect(url_for('leer_clientes'))
+        
+        # 1. Verificar Stock
+        cur.execute("SELECT stock, nombre FROM productos WHERE id_producto = %s", (id_producto_int,))
+        producto_info = cur.fetchone()
+
+        if not producto_info:
+            flash('Producto no encontrado.', 'error')
+            cur.close()
+            return redirect(url_for('leer_clientes'))
+        
+        stock_actual = producto_info['stock']
+        nombre_producto = producto_info['nombre']
+        
+        if stock_actual < cantidad_int:
+            flash(f'No hay suficiente stock para "{nombre_producto}". Stock actual: {stock_actual}.', 'error')
+            cur.close()
+            return redirect(url_for('registrar_compra', cliente_id_opcional=id_cliente_int))
+
+        # 2. Registrar la compra en la tabla pivote y actualizar stock (en una sola transacción)
+        try:
+            # CLAVE DEL FIX: Usamos INSERT ... ON DUPLICATE KEY UPDATE.
+            # 
+            # SI LA COMPRA (cliente_id, producto_id) EXISTE: 
+            #    Se actualiza la columna 'cantidad' sumándole la nueva cantidad. 
+            #    También actualizamos la fecha de compra a la hora actual.
+            #
+            # SI LA COMPRA NO EXISTE:
+            #    Se inserta un nuevo registro.
+            query_compra = """
+                INSERT INTO clientes_productos (id_cliente, id_producto, cantidad)
+                VALUES (%s, %s, %s)
+                ON DUPLICATE KEY UPDATE 
+                    cantidad = cantidad + VALUES(cantidad),
+                    fecha_compra = CURRENT_TIMESTAMP
+            """
+            cur.execute(query_compra, (id_cliente_int, id_producto_int, cantidad_int))
+            
+            # Actualizar el stock del producto
+            nuevo_stock = stock_actual - cantidad_int
+            query_stock = "UPDATE productos SET stock = %s WHERE id_producto = %s"
+            cur.execute(query_stock, (nuevo_stock, id_producto_int))
+            
+            # CONFIRMAMOS AMBAS OPERACIONES
+            mysql.connection.commit() 
+            
+            flash(f'Compra de {cantidad_int} unidades de "{nombre_producto}" registrada y stock actualizado.', 'success')
+            return redirect(url_for('ver_compras', cliente_id=id_cliente_int))
+            
+        except Exception as e:
+            # Manejo de errores genéricos si el problema no fuera la clave duplicada
+            flash('Ocurrió un error al registrar la compra. Inténtalo de nuevo. Se deshicieron los cambios.', 'error')
+            
+            # Si algo falla, hacemos rollback (deshacemos los cambios)
+            mysql.connection.rollback()
+            print(f"Error al registrar la compra y actualizar stock: {e}")
+            return redirect(url_for('registrar_compra', cliente_id_opcional=id_cliente_int))
+        finally:
+            cur.close() # Asegura que el cursor siempre se cierre si llegamos aquí
+
+    # --- Lógica de Formulario (GET) ---
+    # Si es GET o si el POST falló la validación, volvemos a cargar el formulario
+
+    # Cargar clientes y productos para los selectores
+    cur.execute("SELECT id_cliente, nombre FROM clientes ORDER BY nombre")
+    clientes = cur.fetchall()
+    
+    # Solo mostrar productos con stock > 0
+    cur.execute("SELECT id_producto, nombre, precio, stock FROM productos WHERE stock > 0 ORDER BY nombre")
+    productos = cur.fetchall()
+    cur.close()
+
+    # Si se pasa un cliente_id en la URL, lo usamos para preseleccionar
+    cliente_seleccionado = None
+    if cliente_id_opcional:
+        for cliente in clientes:
+            if cliente['id_cliente'] == cliente_id_opcional:
+                cliente_seleccionado = cliente
+                break
+        
+    return render_template('formulario_compra.html', 
+                           clientes=clientes, 
+                           productos=productos,
+                           cliente_seleccionado=cliente_seleccionado)
+
 
 # --- Rutas antiguas que ya no se usan (comentadas) ---
 # @app.route('/profile')
