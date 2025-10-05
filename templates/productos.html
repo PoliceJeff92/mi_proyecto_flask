@@ -36,13 +36,19 @@
                             ✏️ Editar
                         </a>
                         
-                        <!-- BOTÓN PARA ABRIR EL MODAL DE CONFIRMACIÓN -->
-                        <button type="button" class="btn btn-sm btn-danger" 
-                                data-bs-toggle="modal" data-bs-target="#confirmDeleteModal" 
-                                data-producto-id="{{ producto.id_producto }}" 
-                                data-producto-nombre="{{ producto.nombre }}">
-                            🗑️ Eliminar
-                        </button>
+                        <form 
+    method="POST" 
+    action="{{ url_for('eliminar_producto', id_producto=producto.id_producto) }}" 
+    style="display:inline;"
+>
+    <button 
+        type="submit" 
+        class="btn btn-sm btn-danger" 
+        onclick="return confirm('¿Estás seguro de que deseas eliminar {{ producto.nombre }}?')"
+    >
+        🗑️ Eliminar
+    </button>
+</form>
                     </td>
                 </tr>
                 {% endfor %}
@@ -55,7 +61,6 @@
         </div>
     {% endif %}
 
-    <!-- MODAL DE CONFIRMACIÓN DE ELIMINACIÓN (Fuera del bloque content) -->
     <div class="modal fade" id="confirmDeleteModal" tabindex="-1" aria-labelledby="confirmDeleteModalLabel" aria-hidden="true">
       <div class="modal-dialog">
         <div class="modal-content">
@@ -68,7 +73,6 @@
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-            <!-- El formulario de eliminación se enviará desde JS -->
             <form id="deleteForm" method="POST" action="">
                 <button type="submit" class="btn btn-danger">Eliminar Definitivamente</button>
             </form>
@@ -84,26 +88,27 @@
     // Lógica para pasar los datos del producto al modal de Bootstrap
     const confirmDeleteModal = document.getElementById('confirmDeleteModal');
     
-    // Solo si el modal existe, añadimos el listener
+    // --- ÚNICA CORRECCIÓN CLAVE ---
+    // Generamos la URL base de Flask con un marcador de posición que JS pueda reemplazar.
+    // Esto asegura que la URL /eliminar/ID se construya correctamente.
+    const deleteUrlTemplate = '{{ url_for("eliminar_producto", id_producto="ID_PLACEHOLDER") }}';
+    
     if (confirmDeleteModal) {
         confirmDeleteModal.addEventListener('show.bs.modal', function (event) {
-            // Botón que disparó el modal
-            const button = event.relatedTarget;
             
-            // Extraer información de los atributos data-*
+            const button = event.relatedTarget;
             const idProducto = button.getAttribute('data-producto-id');
             const nombreProducto = button.getAttribute('data-producto-nombre');
             
-            // Referencias a elementos dentro del modal
             const modalTitle = confirmDeleteModal.querySelector('#productNamePlaceholder');
-            const deleteForm = confirmDeleteModal.querySelector('#deleteForm');
+            const deleteForm = confirmDeleteModal.querySelector('#deleteForm'); // Referencia al formulario
             
             // 1. Actualizar el nombre del producto en el cuerpo del modal
             modalTitle.textContent = nombreProducto;
             
             // 2. Actualizar la acción del formulario con el ID del producto
-            // Asegúrate de que Flask reconozca esta URL: /eliminar/<int:id_producto>
-            deleteForm.action = '{{ url_for("eliminar_producto", id_producto=0) }}'.replace('0', idProducto);
+            // Sustituimos el marcador de posición por el ID real
+            deleteForm.action = deleteUrlTemplate.replace('ID_PLACEHOLDER', idProducto);
         });
     }
 </script>
